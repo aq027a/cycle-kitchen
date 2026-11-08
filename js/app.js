@@ -1,6 +1,6 @@
 import { PHASES, PHASE_ORDER } from './data/phases.js';
 import { INGREDIENTS, ING, CATEGORIES, COMMON_DISLIKES, DIETS, AVOID_TAGS } from './data/ingredients.js';
-import { RECIPES } from './data/recipes.js';
+import { RECIPES, CUISINES } from './data/recipes.js';
 import * as store from './store.js';
 import { getCycleInfo, today, toISO, parseDate, averageCycleLength } from './cycle.js';
 import { esc, fmtAmount, fmtDate, inDays, uid, normalize } from './format.js';
@@ -18,7 +18,8 @@ state.favorites = state.favorites.filter((id) => RECIPE_BY_ID[id]);
 // Transient UI state (not saved)
 const ui = {
   recipePhase: 'now', // 'now' | phase id | 'all' | 'saved'
-  meal: 'all',
+  meal: 'all', // 'all' | 'classics' | breakfast | lunch | dinner | snack
+  cuisine: 'all',
   search: '',
   dislikeSearch: '',
   servings: {}, // recipeId → servings
@@ -206,7 +207,7 @@ function recipeRow(r) {
       <span class="rrow-body">
         <span class="rtitle">${esc(r.title)}</span>
         <span class="rrow-meta"><span>${MEALS[r.meal]} · ${r.time} min</span><span class="tag">${esc(r.tag)}</span></span>
-        <span class="rrow-sub">${dietLabel(r, ev.omitted)}${r.ro ? ' · <span class="ro">' + esc(r.ro) + '</span>' : r.source ? ' · ' + esc(r.source.name) : ''}${fav ? ' · <span class="saved">♥ Saved</span>' : ''}</span>
+        <span class="rrow-sub">${dietLabel(r, ev.omitted)}${r.ro ? ' · <span class="ro">' + esc(r.ro) + '</span>' : r.cuisine ? ' · ' + CUISINES[r.cuisine] : r.source ? ' · ' + esc(r.source.name) : ''}${fav ? ' · <span class="saved">♥ Saved</span>' : ''}</span>
       </span>
       ${icon('chevron', 20, 'muted')}
     </a>`;
@@ -279,6 +280,8 @@ const REASON = {
   'Vitamin C': 'Vitamin C boost',
   'Healthy fats': 'Healthy fats for hormones',
   Zinc: 'Zinc & fiber',
+  Calcium: 'Calcium to ease PMS',
+  'B vitamins': 'B vitamins for energy & mood',
 };
 
 const MENU_SLOTS = [
@@ -593,8 +596,9 @@ function filteredRecipes() {
   let base = RECIPES;
   if (phase) base = base.filter((r) => r.phases.includes(phase));
   if (f === 'saved') base = base.filter((r) => state.favorites.includes(r.id));
-  if (ui.meal === 'ro') base = base.filter((r) => r.ro);
+  if (ui.meal === 'classics') base = base.filter((r) => r.classic);
   else if (ui.meal !== 'all') base = base.filter((r) => r.meal === ui.meal);
+  if (ui.cuisine !== 'all') base = base.filter((r) => r.cuisine === ui.cuisine);
   const q = normalize(ui.search.trim());
   if (q) {
     base = base.filter(
@@ -626,11 +630,20 @@ function renderRecipeResults() {
 }
 
 function mealChips() {
-  return ['all', 'ro', 'breakfast', 'lunch', 'dinner', 'snack']
+  return ['all', 'classics', 'breakfast', 'lunch', 'dinner', 'snack']
     .map((m) => {
       const on = ui.meal === m;
-      const label = m === 'all' ? 'All' : m === 'ro' ? 'Romanian-style' : MEALS[m];
+      const label = m === 'all' ? 'All' : m === 'classics' ? 'Classics' : MEALS[m];
       return `<button type="button" class="chip ${on ? 'on' : ''}" aria-pressed="${on}" data-act="meal" data-meal="${m}">${label}</button>`;
+    })
+    .join('');
+}
+
+function cuisineChips() {
+  return [['all', 'All cuisines'], ...Object.entries(CUISINES)]
+    .map(([k, label]) => {
+      const on = ui.cuisine === k;
+      return `<button type="button" class="chip small ${on ? 'on' : ''}" aria-pressed="${on}" data-act="cuisine" data-cuisine="${k}">${label}</button>`;
     })
     .join('');
 }
@@ -672,6 +685,7 @@ function viewRecipes(arg, params) {
       <span class="edit">Edit</span>
     </a>
     <div class="chips scroll-x" id="mealChips" role="group" aria-label="Filter by meal">${mealChips()}</div>
+    <div class="chips scroll-x cuisine-row" id="cuisineChips" role="group" aria-label="Filter by cuisine">${cuisineChips()}</div>
     <div id="results"></div>
   `;
   renderRecipeResults();
@@ -1232,6 +1246,11 @@ const actions = {
   meal: (el) => {
     ui.meal = el.dataset.meal;
     document.getElementById('mealChips').innerHTML = mealChips();
+    renderRecipeResults();
+  },
+  cuisine: (el) => {
+    ui.cuisine = el.dataset.cuisine;
+    document.getElementById('cuisineChips').innerHTML = cuisineChips();
     renderRecipeResults();
   },
   back: () => {

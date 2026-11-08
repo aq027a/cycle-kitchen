@@ -1529,6 +1529,23 @@ button {
   margin-top: 4px;
 }
 
+.cuisine-row {
+  margin-top: 8px !important;
+}
+
+.chip.small {
+  height: 38px;
+  padding: 0 14px;
+  font-size: 14px;
+  background: transparent;
+  border: 1.5px solid var(--track);
+}
+
+.chip.small.on {
+  background: var(--ink);
+  border-color: var(--ink);
+}
+
 /* ───────── Recipe detail ───────── */
 .hero-img {
   position: relative;
