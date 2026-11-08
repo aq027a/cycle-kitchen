@@ -54,6 +54,11 @@ const ICON = {
   book: '<path d="M12 6.5C10 5 7 4.5 4 5v13.5c3-.5 6 0 8 1.5 2-1.5 5-2 8-1.5V5c-3-.5-6 0-8 1.5z"/><path d="M12 6.5V20"/>',
   sliders: '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
   drop: '<path d="M12 3.5s6 6.4 6 10.5a6 6 0 0 1-12 0c0-4.1 6-10.5 6-10.5z"/>',
+  bolt: '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
+  moon: '<path d="M19 14.5A7.5 7.5 0 0 1 9.5 5a7.5 7.5 0 1 0 9.5 9.5z"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4"/>',
+  sunrise: '<path d="M4 18h16"/><path d="M7 18a5 5 0 0 1 10 0"/><path d="M12 7v3M5.6 11.2l1.8 1.3M18.4 11.2l-1.8 1.3"/>',
+  swap: '<path d="M4 12a8 8 0 0 1 14-5.3L20 9"/><path d="M20 4v5h-5"/><path d="M20 12a8 8 0 0 1-14 5.3L4 15"/><path d="M4 20v-5h5"/>',
   external: '<path d="M14 5h5v5M19 5l-8 8"/><path d="M18 14v4a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h4"/>',
   bulb: '<path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.4 1 1.1 1 1.9V16h5v-.2c0-.8.4-1.5 1-1.9A6 6 0 0 0 12 3z"/>',
   breakfast: '<path d="M4 9h13v4a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5z"/><path d="M17 10h1.5a2.5 2.5 0 0 1 0 5H17"/><path d="M8 3.5c0 1.2-.8 1.6-.8 2.8M12 3.5c0 1.2-.8 1.6-.8 2.8"/>',
@@ -207,27 +212,6 @@ function recipeRow(r) {
     </a>`;
 }
 
-function recipeBigCard(r, phaseId) {
-  const ev = evaluate(r);
-  return `
-    <a class="rcard" href="#/recipe/${r.id}">
-      <span class="rcard-img" style="${phaseVars(r.phases[0])}">
-        ${icon(r.meal, 44)}
-        ${photo(r, 800, 450)}
-        <span class="img-badge">${esc(PHASES[phaseId].forLabel)}</span>
-      </span>
-      <span class="rcard-body">
-        <span class="rtitle big">${esc(r.title)}</span>
-        <span class="meta">
-          <span class="meta-i">${icon('clock', 16)}${r.time} min</span>
-          <span>${esc(servingsLabel(r, recipeServings(r)))}</span>
-          <span>${dietLabel(r, ev.omitted)}</span>
-        </span>
-        ${r.source ? `<span class="source-line">Recipe from ${esc(r.source.name)}</span>` : ''}
-      </span>
-    </a>`;
-}
-
 function toast(msg) {
   toastEl.textContent = msg;
   toastEl.hidden = false;
@@ -271,51 +255,204 @@ function backBtn(href, label = 'Back') {
 
 // ───────────────────────── Today ─────────────────────────
 
-function pickForToday(phaseId, cycleDay) {
-  const list = plantsFirst(visibleRecipes().filter((r) => r.phases.includes(phaseId)));
-  const primary = list.filter((r) => r.phases[0] === phaseId);
-  const secondary = list.filter((r) => r.phases[0] !== phaseId);
-  const rotate = (arr) => (arr.length ? arr.slice(cycleDay % arr.length).concat(arr.slice(0, cycleDay % arr.length)) : arr);
-  const ordered = [...rotate(primary), ...rotate(secondary)];
-  // Lead with the meal that fits the time of day
-  const h = new Date().getHours();
-  const mealNow = h < 11 ? 'breakfast' : h < 15 ? 'lunch' : h < 21 ? 'dinner' : 'snack';
-  const lead = ordered.find((r) => r.meal === mealNow) || ordered[0];
-  const rest = ordered.filter((r) => r !== lead);
-  const picks = [];
-  for (const meal of ['breakfast', 'lunch', 'dinner', 'snack']) {
-    const r = rest.find((x) => x.meal === meal && !picks.includes(x));
-    if (r && picks.length < 3) picks.push(r);
-  }
-  return { lead, more: picks };
+// Design "Today · B": energy curve over the cycle + a day menu as a timeline.
+
+const ENERGY = {
+  menstruation: { label: 'Low energy', icon: 'drop', line: 'Rest and refuel – warm, iron-rich food helps most now.' },
+  follicular: { label: 'High energy', icon: 'bolt', line: 'Climbing toward your peak – fuel it with protein & fresh food.' },
+  ovulation: { label: 'Peak energy', icon: 'bolt', line: 'Your energy peaks – go for colorful veg and plenty of fiber.' },
+  luteal: { label: 'Winding down', icon: 'moon', line: 'Energy is easing off – slow carbs & magnesium keep you steady.' },
+};
+
+// Short "why" line under each menu item, from the recipe's key nutrient
+const REASON = {
+  Iron: 'Iron to refuel',
+  Protein: 'Protein to keep you full',
+  Fiber: 'Fiber for steady energy',
+  'Omega-3': 'Omega-3s to calm inflammation',
+  Magnesium: 'Magnesium for cravings & cramps',
+  Folate: 'Folate & iron',
+  'Complex carbs': 'Slow carbs for steady blood sugar',
+  'Vitamin B6': 'B6 for mood support',
+  Fermented: 'Good for your gut',
+  Antioxidants: 'Antioxidants & color',
+  'Vitamin C': 'Vitamin C boost',
+  'Healthy fats': 'Healthy fats for hormones',
+  Zinc: 'Zinc & fiber',
+};
+
+const MENU_SLOTS = [
+  { meal: 'breakfast', label: 'Breakfast', icon: 'sunrise', color: '#B07A12', tint: '#F3E7CF' },
+  { meal: 'lunch', label: 'Lunch', icon: 'sun', color: '#B07A12', tint: '#E3ECD0' },
+  { meal: 'snack', label: 'Snack', icon: 'snack', color: '#A8443A', tint: '#F1DDD6' },
+  { meal: 'dinner', label: 'Dinner', icon: 'moon', color: '#5B4B9A', tint: '#E9E2D5' },
+];
+
+/** Today's swap choices are remembered for the day (state.menu = { date, offsets }). */
+function menuOffsets() {
+  const d = toISO(today());
+  if (!state.menu || state.menu.date !== d) state.menu = { date: d, offsets: {} };
+  return state.menu.offsets;
 }
 
-function cycleBar(info) {
+/** Recipe options per meal for this phase; falls back to any phase if none fit. */
+function mealPool(meal, phaseId, cycleDay) {
+  const visible = visibleRecipes().filter((r) => r.meal === meal);
+  let pool = plantsFirst(visible.filter((r) => r.phases.includes(phaseId)));
+  pool.sort((a, b) => (b.phases[0] === phaseId) - (a.phases[0] === phaseId));
+  if (!pool.length) pool = plantsFirst(visible);
+  if (!pool.length) return [];
+  const k = cycleDay % pool.length; // rotate daily
+  return pool.slice(k).concat(pool.slice(0, k));
+}
+
+function todaysMenu(phaseId, cycleDay) {
+  const offsets = menuOffsets();
+  return MENU_SLOTS.map((slot) => {
+    const pool = mealPool(slot.meal, phaseId, cycleDay);
+    const recipe = pool.length ? pool[(offsets[slot.meal] || 0) % pool.length] : null;
+    return { ...slot, recipe, options: pool.length };
+  }).filter((s) => s.recipe);
+}
+
+/** Monotone cubic interpolation (no overshoot) through [x, y] points. */
+function smoothCurve(pts) {
+  const n = pts.length;
+  const xs = pts.map((p) => p[0]);
+  const ys = pts.map((p) => p[1]);
+  const d = [];
+  for (let i = 0; i < n - 1; i++) d.push((ys[i + 1] - ys[i]) / (xs[i + 1] - xs[i]));
+  const m = [d[0]];
+  for (let i = 1; i < n - 1; i++) m.push(d[i - 1] * d[i] <= 0 ? 0 : (d[i - 1] + d[i]) / 2);
+  m.push(d[n - 2]);
+  for (let i = 0; i < n - 1; i++) {
+    if (d[i] === 0) {
+      m[i] = m[i + 1] = 0;
+      continue;
+    }
+    const a = m[i] / d[i];
+    const b = m[i + 1] / d[i];
+    const s = a * a + b * b;
+    if (s > 9) {
+      const t = 3 / Math.sqrt(s);
+      m[i] = t * a * d[i];
+      m[i + 1] = t * b * d[i];
+    }
+  }
+  return (x) => {
+    let i = 0;
+    while (i < n - 2 && x > xs[i + 1]) i++;
+    const h = xs[i + 1] - xs[i];
+    const t = Math.min(1, Math.max(0, (x - xs[i]) / h));
+    const t2 = t * t;
+    const t3 = t2 * t;
+    return (2 * t3 - 3 * t2 + 1) * ys[i] + (t3 - 2 * t2 + t) * h * m[i] + (-2 * t3 + 3 * t2) * ys[i + 1] + (t3 - t2) * h * m[i + 1];
+  };
+}
+
+const PHASE_BAR = { menstruation: '#C4554B', follicular: '#4E7A1E', ovulation: '#D9A21E', luteal: '#7B6BC0' };
+
+function energyCurveSVG(info) {
   const L = info.cycleLength;
-  const segs = info.ranges
-    .map((r) => `<i class="${r.id === info.phaseId ? 'on' : ''}" style="flex:${r.end - r.start + 1}"></i>`)
+  const X0 = 10;
+  const X1 = 300;
+  const xOf = (day) => X0 + ((day - 1) / L) * (X1 - X0); // day 1 starts at X0, day L+1 ends at X1
+  const R = Object.fromEntries(info.ranges.map((r) => [r.id, r]));
+  const center = (r) => (r.start + r.end + 1) / 2;
+
+  // Typical energy shape: low in the period, rising, peak at ovulation, easing off in the luteal phase
+  const key = [[1, 60]];
+  if (R.menstruation) key.push([center(R.menstruation), 67], [R.menstruation.end + 1, 63]);
+  if (R.follicular) key.push([center(R.follicular), 42]);
+  if (R.ovulation) key.push([center(R.ovulation), 18]);
+  if (R.luteal) {
+    const len = R.luteal.end - R.luteal.start + 1;
+    key.push([R.luteal.start + 0.6, 25], [R.luteal.start + len * 0.45, 45]);
+  }
+  key.push([L + 1, 60]);
+  const pts = key.map(([d, y]) => [xOf(d), y]).filter((p, i, a) => i === 0 || p[0] > a[i - 1][0] + 0.5);
+  const f = smoothCurve(pts);
+
+  const sample = (from, to) => {
+    const out = [];
+    for (let x = from; x < to; x += 3) out.push([x, f(x)]);
+    out.push([to, f(to)]);
+    return out.map(([x, y], i) => `${i ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`).join(' ');
+  };
+  const full = sample(X0, X1);
+  const tx = xOf(info.cycleDay + 0.5);
+  const ty = f(tx);
+  const past = sample(X0, tx);
+  // "Today" always sits above the point (the viewBox starts at y=-14 to leave room at the peak)
+  const labelX = Math.min(285, Math.max(25, tx));
+  const labelY = ty - 14;
+  const anchor = 'middle';
+
+  const bars = info.ranges
+    .map((r) => {
+      const x = xOf(r.start);
+      const w = Math.max(xOf(r.end + 1) - x - 2, 2);
+      const on = r.id === info.phaseId;
+      const lx = Math.min(290, Math.max(20, x + w / 2));
+      return `<rect x="${x.toFixed(1)}" y="78" width="${w.toFixed(1)}" height="6" rx="3" fill="${PHASE_BAR[r.id]}"/>
+        <text x="${lx.toFixed(1)}" y="100" text-anchor="middle" font-size="11" ${on ? 'font-weight="600" fill="#1F2A22"' : 'fill="#34452A"'}>${PHASES[r.id].short}</text>`;
+    })
     .join('');
-  const pos = Math.min(98, Math.max(2, ((info.cycleDay - 0.5) / L) * 100));
-  return `<div class="cycle-bar" aria-hidden="true"><div class="segs">${segs}</div><span class="marker" style="left:${pos}%"></span></div>`;
+
+  return `
+    <svg class="energy-curve" viewBox="0 -14 310 118" width="100%" height="118" aria-hidden="true">
+      <path d="${full} L${X1} 72 L${X0} 72 Z" fill="#1F2A22" fill-opacity="0.06"/>
+      <path d="${full}" fill="none" stroke="#1F2A22" stroke-opacity="0.3" stroke-width="2.5" stroke-dasharray="4 4" stroke-linecap="round"/>
+      <path d="${past}" fill="none" stroke="#1F2A22" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      <line x1="${tx.toFixed(1)}" y1="${(ty + 8).toFixed(1)}" x2="${tx.toFixed(1)}" y2="74" stroke="#1F2A22" stroke-width="1.5" stroke-dasharray="2 3"/>
+      <text x="${labelX.toFixed(1)}" y="${labelY.toFixed(1)}" text-anchor="${anchor}" font-size="11" font-weight="600" fill="#1F2A22">Today</text>
+      <circle cx="${tx.toFixed(1)}" cy="${ty.toFixed(1)}" r="7" fill="#FFFFFF" stroke="#1F2A22" stroke-width="3"/>
+      ${bars}
+    </svg>`;
+}
+
+function menuItem(slot) {
+  const r = slot.recipe;
+  return `
+    <li class="menu-item">
+      <span class="menu-dot" style="color:${slot.color}" aria-hidden="true">${icon(slot.icon, 20)}</span>
+      <div class="menu-card">
+        <a class="menu-link" href="#/recipe/${r.id}">
+          <span class="menu-thumb" style="background:${slot.tint}">${icon(r.meal, 26)}${photo(r, 160, 160)}</span>
+          <span class="menu-text">
+            <span class="menu-meta">${slot.label} · ${r.time} min</span>
+            <span class="menu-title">${esc(r.title)}</span>
+            <span class="menu-reason">${esc(REASON[r.tag] || r.tag)}</span>
+          </span>
+        </a>
+        ${
+          slot.options > 1
+            ? `<button type="button" class="swap-btn" data-act="swap-meal" data-meal="${slot.meal}" aria-label="Show another ${slot.label.toLowerCase()}">${icon('swap', 18)}</button>`
+            : ''
+        }
+      </div>
+    </li>`;
 }
 
 function viewToday() {
   const s = state.settings;
   const info = cycleInfo();
   const ph = PHASES[info.phaseId];
-  const { lead, more } = pickForToday(ph.id, info.cycleDay);
+  const energy = ENERGY[ph.id];
+  const menu = todaysMenu(ph.id, info.cycleDay);
 
-  let nextLine;
-  if (info.status === 'late') nextLine = `Your period is ${info.lateBy} ${info.lateBy === 1 ? 'day' : 'days'} late`;
-  else if (info.nextPhaseId === 'menstruation') nextLine = `Next period ${inDays(info.daysToNext)} · ${fmtDate(info.nextPeriod, { month: 'short', day: 'numeric' })}`;
-  else nextLine = `${PHASES[info.nextPhaseId].name} ${inDays(info.daysToNext)}`;
-
-  const banner =
-    info.status === 'estimate'
-      ? `<div class="banner">You haven't logged a period in a while, so your phase is an estimate. <a href="#/settings">Update your last period</a></div>`
-      : '';
+  let banner = '';
+  if (info.status === 'late') {
+    banner = `<div class="banner">Your period is ${info.lateBy} ${info.lateBy === 1 ? 'day' : 'days'} late. Has it started?</div>`;
+  } else if (info.status === 'estimate') {
+    banner = `<div class="banner">You haven't logged a period in a while, so your phase is an estimate. <a href="#/settings">Update your last period</a></div>`;
+  }
 
   const initial = (s.name || '').trim().charAt(0).toUpperCase();
+  const nextLine =
+    info.nextPhaseId === 'menstruation'
+      ? `next period ${inDays(info.daysToNext)}`
+      : `${PHASES[info.nextPhaseId].name.toLowerCase()} ${inDays(info.daysToNext)}`;
 
   app.innerHTML = `
     <header class="hello">
@@ -326,29 +463,24 @@ function viewToday() {
       </span>
     </header>
     ${banner}
-    <section class="phase-hero" style="${phaseVars(ph.id)}">
-      <div class="row between">
-        <span class="pill-soft"><i class="dot"></i>${esc(ph.name)}</span>
-        <span class="small-ink">Day ${info.displayDay} of ${info.cycleLength}</span>
-      </div>
-      <h2 class="hero-title">${esc(ph.headline)}</h2>
-      <p class="hero-text">${esc(ph.intro)}</p>
-      ${cycleBar(info)}
-      <span class="small-ink">${esc(nextLine)}</span>
-      <a class="white-cta" href="#/phase">
-        <span>What's good for you now</span>
-        <span class="cta-dot">${icon('arrow', 18)}</span>
-      </a>
-    </section>
+    <a class="energy-card" href="#/phase" style="${phaseVars(ph.id)}"
+       aria-label="Day ${info.displayDay}, ${esc(ph.name)}, ${energy.label.toLowerCase()}, ${esc(nextLine)}. See what's good for you now">
+      <span class="energy-head">
+        <span class="energy-title">Day ${info.displayDay} · ${esc(ph.short)}</span>
+        <span class="energy-pill">${icon(energy.icon, 14, 'filled')}${energy.label}</span>
+      </span>
+      <span class="energy-line">${esc(energy.line)}</span>
+      ${energyCurveSVG(info)}
+    </a>
 
-    <div class="section-head">
-      <h2>Recommended today</h2>
-      <a href="#/recipes" data-act="recipes-now">All recipes</a>
+    <div class="section-head menu-head">
+      <h2>Today's menu</h2>
+      ${menu.length ? '<button type="button" class="text-link" data-act="add-menu">Add all to list</button>' : ''}
     </div>
     ${
-      lead
-        ? `${recipeBigCard(lead, ph.id)}<div class="rlist">${more.map(recipeRow).join('')}</div>`
-        : `<div class="empty">No recipe for this phase fits your settings yet. <a href="#/settings">Adjust settings</a></div>`
+      menu.length
+        ? `<ol class="menu-timeline">${menu.map(menuItem).join('')}</ol>`
+        : `<div class="empty">No recipe fits your settings yet. <a href="#/settings">Adjust settings</a></div>`
     }
 
     <button class="period-btn" data-act="log-period">${icon('drop', 20)}<span>${info.status === 'late' ? 'My period started' : 'My period started today'}</span></button>
@@ -651,11 +783,14 @@ function viewRecipe(id) {
   `;
 }
 
-function addRecipeToList(id) {
-  const r = RECIPE_BY_ID[id];
+/** Adds a recipe's selected ingredients to the list (merging same items). Returns the count. */
+function addIngredientsOf(r) {
   const ev = evaluate(r);
   const factor = recipeServings(r) / r.servings;
-  const unchecked = ui.unchecked[id] || new Set();
+  if (!ui.unchecked[r.id]) {
+    ui.unchecked[r.id] = new Set(state.settings.skipStaples ? r.ingredients.filter(([iid]) => ING[iid].staple).map(([iid]) => iid) : []);
+  }
+  const unchecked = ui.unchecked[r.id];
   let added = 0;
   for (const [iid, amount, unit] of r.ingredients) {
     if (ev.omitted.includes(iid) || unchecked.has(iid)) continue;
@@ -673,9 +808,23 @@ function addRecipeToList(id) {
     }
     added++;
   }
+  return added;
+}
+
+function addRecipeToList(id) {
+  const added = addIngredientsOf(RECIPE_BY_ID[id]);
   commit();
   render();
   toast(`${added} ${added === 1 ? 'item' : 'items'} added to your shopping list`);
+}
+
+function addMenuToList() {
+  const info = cycleInfo();
+  const menu = todaysMenu(info.phaseId, info.cycleDay);
+  const added = menu.reduce((n, slot) => n + addIngredientsOf(slot.recipe), 0);
+  commit();
+  render();
+  toast(`${added} items from ${menu.length} recipes added to your list`);
 }
 
 // ───────────────────────── Shopping list ─────────────────────────
@@ -1119,6 +1268,13 @@ const actions = {
     afterSettingsChange();
   },
   'add-to-list': (el) => addRecipeToList(el.dataset.id),
+  'swap-meal': (el) => {
+    const offsets = menuOffsets();
+    offsets[el.dataset.meal] = (offsets[el.dataset.meal] || 0) + 1;
+    commit();
+    render();
+  },
+  'add-menu': () => addMenuToList(),
   'shop-remove': (el) => {
     state.shopping = state.shopping.filter((i) => i.id !== el.dataset.id);
     commit();
