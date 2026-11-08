@@ -12,6 +12,8 @@ const RECIPE_BY_ID = Object.fromEntries(RECIPES.map((r) => [r.id, r]));
 const MEALS = { breakfast: 'Breakfast', lunch: 'Lunch', dinner: 'Dinner', snack: 'Snack' };
 
 let state = store.load();
+// Drop saved recipes that no longer exist (e.g. after the recipe set changed)
+state.favorites = state.favorites.filter((id) => RECIPE_BY_ID[id]);
 
 // Transient UI state (not saved)
 const ui = {
@@ -52,6 +54,7 @@ const ICON = {
   book: '<path d="M12 6.5C10 5 7 4.5 4 5v13.5c3-.5 6 0 8 1.5 2-1.5 5-2 8-1.5V5c-3-.5-6 0-8 1.5z"/><path d="M12 6.5V20"/>',
   sliders: '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
   drop: '<path d="M12 3.5s6 6.4 6 10.5a6 6 0 0 1-12 0c0-4.1 6-10.5 6-10.5z"/>',
+  external: '<path d="M14 5h5v5M19 5l-8 8"/><path d="M18 14v4a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h4"/>',
   bulb: '<path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.4 1 1.1 1 1.9V16h5v-.2c0-.8.4-1.5 1-1.9A6 6 0 0 0 12 3z"/>',
   breakfast: '<path d="M4 9h13v4a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5z"/><path d="M17 10h1.5a2.5 2.5 0 0 1 0 5H17"/><path d="M8 3.5c0 1.2-.8 1.6-.8 2.8M12 3.5c0 1.2-.8 1.6-.8 2.8"/>',
   lunch: '<path d="M3 11h18a9 9 0 0 1-18 0z"/><path d="M9 7.5c0-1.2.8-1.6.8-2.8M13 7.5c0-1.2.8-1.6.8-2.8"/>',
@@ -180,16 +183,24 @@ function stepper(field, value, min, max, label, ariaLess, ariaMore) {
     </div>`;
 }
 
+/** Embedded photo from the original recipe; removes itself if it can't load (offline etc.),
+ *  so the colored meal icon underneath shows instead. */
+function photo(r, w, h, alt = '') {
+  if (!r.image) return '';
+  const src = `${r.image}?quality=80&resize=${w},${h}`;
+  return `<img class="photo" src="${esc(src)}" alt="${esc(alt)}" loading="lazy" decoding="async" onerror="this.remove()">`;
+}
+
 function recipeRow(r) {
   const ev = evaluate(r);
   const fav = state.favorites.includes(r.id);
   return `
     <a class="rrow" href="#/recipe/${r.id}">
-      <span class="rthumb" style="${phaseVars(r.phases[0])}">${icon(r.meal, 26)}</span>
+      <span class="rthumb" style="${phaseVars(r.phases[0])}">${icon(r.meal, 26)}${photo(r, 200, 200)}</span>
       <span class="rrow-body">
         <span class="rtitle">${esc(r.title)}</span>
         <span class="rrow-meta"><span>${MEALS[r.meal]} · ${r.time} min</span><span class="tag">${esc(r.tag)}</span></span>
-        <span class="rrow-sub">${dietLabel(r, ev.omitted)}${fav ? ' · <span class="saved">♥ Saved</span>' : ''}</span>
+        <span class="rrow-sub">${dietLabel(r, ev.omitted)}${r.source ? ' · ' + esc(r.source.name) : ''}${fav ? ' · <span class="saved">♥ Saved</span>' : ''}</span>
       </span>
       ${icon('chevron', 20, 'muted')}
     </a>`;
@@ -197,20 +208,21 @@ function recipeRow(r) {
 
 function recipeBigCard(r, phaseId) {
   const ev = evaluate(r);
-  const servings = state.settings.defaultServings;
   return `
     <a class="rcard" href="#/recipe/${r.id}">
       <span class="rcard-img" style="${phaseVars(r.phases[0])}">
         ${icon(r.meal, 44)}
+        ${photo(r, 800, 450)}
         <span class="img-badge">${esc(PHASES[phaseId].forLabel)}</span>
       </span>
       <span class="rcard-body">
         <span class="rtitle big">${esc(r.title)}</span>
         <span class="meta">
           <span class="meta-i">${icon('clock', 16)}${r.time} min</span>
-          <span>${servings} ${servings === 1 ? 'serving' : 'servings'}</span>
+          <span>${esc(servingsLabel(r, recipeServings(r)))}</span>
           <span>${dietLabel(r, ev.omitted)}</span>
         </span>
+        ${r.source ? `<span class="source-line">Recipe from ${esc(r.source.name)}</span>` : ''}
       </span>
     </a>`;
 }
@@ -531,8 +543,18 @@ function viewRecipes(arg, params) {
 
 // ───────────────────────── Recipe detail ─────────────────────────
 
+/** Batch recipes (e.g. energy balls) start at their original yield; meals at the user's default. */
 function recipeServings(r) {
-  return ui.servings[r.id] ?? state.settings.defaultServings ?? r.servings;
+  return ui.servings[r.id] ?? (r.batch ? r.servings : state.settings.defaultServings ?? r.servings);
+}
+
+function servingsLabel(r, n) {
+  const [one, many] = r.batch?.noun || ['serving', 'servings'];
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+function servingsMax(r) {
+  return r.batch ? r.servings * 3 : 8;
 }
 
 function viewRecipe(id) {
@@ -577,6 +599,8 @@ function viewRecipe(id) {
       <button class="circle-btn on-img" data-act="back" aria-label="Back to recipes">${icon('back', 20)}</button>
       <button class="circle-btn on-img fav ${fav ? 'on' : ''}" data-act="fav" data-id="${id}" aria-pressed="${fav}" aria-label="Save recipe">${icon('heart', 20)}</button>
       ${icon(r.meal, 72)}
+      ${photo(r, 800, 600, r.title)}
+      ${r.image && r.source ? `<a class="photo-credit" href="${esc(r.source.url)}" target="_blank" rel="noopener noreferrer">Photo: ${esc(r.source.name)}</a>` : ''}
     </div>
     <div class="sheet">
       <h1 class="recipe-title">${esc(r.title)}</h1>
@@ -585,7 +609,7 @@ function viewRecipe(id) {
           <span class="meta-i">${icon('clock', 16)}${r.time} min</span>
           <span>${dietLabel(r, ev.omitted)}</span>
         </span>
-        ${stepper('servings', servings, 1, 8, `${servings} ${servings === 1 ? 'serving' : 'servings'}`, 'Fewer servings', 'More servings')}
+        ${stepper('servings', servings, 1, servingsMax(r), servingsLabel(r, servings), 'Fewer', 'More')}
       </div>
       ${!ev.ok ? `<div class="banner">This doesn't fit your settings because it contains <b>${esc(ING[ev.blocker].name)}</b>.</div>` : ''}
       <div class="why-card">
@@ -593,6 +617,17 @@ function viewRecipe(id) {
         <span>${esc(r.why)}</span>
         <span class="phase-dots">${r.phases.map((p) => `<span class="mini-pill" style="${phaseVars(p)}"><i class="dot"></i>${esc(PHASES[p].short)}</span>`).join('')}</span>
       </div>
+      ${
+        r.source
+          ? `<a class="source-card" href="${esc(r.source.url)}" target="_blank" rel="noopener noreferrer">
+              <span class="source-text">
+                <span class="source-title">View original with photos</span>
+                <span class="source-sub">Recipe from ${esc(r.source.name)}</span>
+              </span>
+              <span class="cta-dot">${icon('external', 18)}</span>
+            </a>`
+          : ''
+      }
       <div class="tabs" role="tablist" aria-label="Recipe view">
         <button type="button" role="tab" aria-selected="${isIng}" class="${isIng ? 'on' : ''}" data-act="recipe-tab" data-tab="ing">Ingredients</button>
         <button type="button" role="tab" aria-selected="${!isIng}" class="${!isIng ? 'on' : ''}" data-act="recipe-tab" data-tab="steps">Method</button>
@@ -601,7 +636,8 @@ function viewRecipe(id) {
         isIng
           ? `<ul class="white-card ing-list">${ingRows}</ul>
              <p class="fineprint">Untick what you already have at home.</p>`
-          : `<ol class="white-card steps">${steps}</ol>`
+          : `<ol class="white-card steps">${steps}</ol>
+             ${r.source ? `<p class="fineprint">Short version in our own words. Full method on <a href="${esc(r.source.url)}" target="_blank" rel="noopener noreferrer">${esc(r.source.name)}</a>.</p>` : ''}`
       }
     </div>
     <button class="dark-cta sticky-cta" data-act="add-to-list" data-id="${id}" ${selectedCount ? '' : 'disabled'}>

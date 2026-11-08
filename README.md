@@ -47,9 +47,13 @@ sw.js                   Service worker (offline)
 manifest.webmanifest    PWA manifest
 ```
 
+### Recipe sources
+
+The recipes are based on tested recipes from [BBC Good Food](https://www.bbcgoodfood.com). Ingredients and amounts follow the original; the method is a short summary in our own words. Each recipe links to its original (with photos) via `source`. Photos and original texts are not copied into the app.
+
 ### Adding a recipe
 
-Add an `R({...})` to `js/data/recipes.js`. Ingredients reference ids from `ingredients.js`. Whether a recipe is vegan or vegetarian is worked out from its ingredients. Ingredients marked `{ optional: true }` are left out instead of hiding the recipe.
+Add an `R({...})` to `js/data/recipes.js`, with a `source` link to the original. Ingredients reference ids from `ingredients.js`. Whether a recipe is vegan or vegetarian is worked out from its ingredients. Ingredients marked `{ optional: true }` are left out instead of hiding the recipe.
 
 After changes, bump `CACHE` in `sw.js` so installed apps pick up the update.
 

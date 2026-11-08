@@ -5,8 +5,11 @@ export function esc(s) {
 }
 
 const FRACTIONS = { 0.25: '¼', 0.5: '½', 0.75: '¾' };
-const PLURAL = { can: 'cans', clove: 'cloves', slice: 'slices', bunch: 'bunches', handful: 'handfuls' };
-const FINE_UNITS = new Set(['tbsp', 'tsp', 'bunch']);
+const PLURAL = {
+  can: 'cans', clove: 'cloves', slice: 'slices', bunch: 'bunches', handful: 'handfuls',
+  sprig: 'sprigs', stalk: 'stalks', pod: 'pods', pinch: 'pinches',
+};
+const FINE_UNITS = new Set(['tbsp', 'tsp', 'bunch', 'pinch']);
 // Things you can only buy whole → round up on the shopping list
 const WHOLE_UNITS = new Set(['', 'can', 'clove', 'bunch', 'slice']);
 
@@ -26,7 +29,8 @@ function niceNumber(v, step) {
  * shopping=true rounds whole items up (2½ onions → 3).
  */
 export function fmtAmount(amount, unit, shopping = false) {
-  if (amount == null) return shopping ? '' : 'to taste';
+  // No fixed amount: show the unit word ("to serve", "splash", "pinch") or "to taste"
+  if (amount == null) return shopping ? '' : unit || 'to taste';
   if (shopping && WHOLE_UNITS.has(unit)) amount = Math.ceil(amount - 0.01);
   let num;
   if (unit === 'g' || unit === 'ml') {
