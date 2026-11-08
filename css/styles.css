@@ -1167,6 +1167,57 @@ button {
   background: var(--soft);
 }
 
+/* ───────── More ideas (Spoonacular) ───────── */
+.seg {
+  display: flex;
+  background: var(--track);
+  border-radius: 22px;
+  padding: 4px;
+  gap: 4px;
+  margin-top: 12px;
+}
+
+.seg button {
+  flex: 1;
+  height: 40px;
+  border: 0;
+  border-radius: 18px;
+  background: transparent;
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.seg button.on {
+  background: var(--card);
+  font-weight: 600;
+}
+
+.powered {
+  margin: 18px 0 4px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.powered a {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.block-btn {
+  display: block;
+  width: 100%;
+  margin-top: 12px;
+}
+
+.ideas-count {
+  margin: 0 4px 8px;
+}
+
+.mini-pill.neutral {
+  background: var(--soft);
+}
+
 /* ───────── Recipe cards ───────── */
 .rcard {
   display: flex;

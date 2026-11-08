@@ -1,7 +1,7 @@
 // Service worker: makes the app work offline.
 // App files: network first (always fresh), cache when offline.
 // Google Fonts: cache first (they never change).
-const CACHE = 'cyclekitchen-v5';
+const CACHE = 'cyclekitchen-v6';
 const SHELL = [
   './',
   './index.html',
@@ -11,6 +11,7 @@ const SHELL = [
   './js/store.js',
   './js/cycle.js',
   './js/format.js',
+  './js/config.js',
   './js/data/phases.js',
   './js/data/ingredients.js',
   './js/data/recipes.js',

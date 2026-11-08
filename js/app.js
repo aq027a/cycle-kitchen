@@ -4,6 +4,7 @@ import { RECIPES, CUISINES } from './data/recipes.js';
 import * as store from './store.js';
 import { getCycleInfo, today, toISO, parseDate, averageCycleLength } from './cycle.js';
 import { esc, fmtAmount, fmtDate, inDays, uid, normalize } from './format.js';
+import { API_BASE } from './config.js';
 
 const app = document.getElementById('app');
 const nav = document.getElementById('nav');
@@ -20,6 +21,9 @@ const ui = {
   recipePhase: 'now', // 'now' | phase id | 'all' | 'saved'
   meal: 'all', // 'all' | 'classics' | breakfast | lunch | dinner | snack
   cuisine: 'all',
+  recipeSource: 'ours', // 'ours' | 'ideas'
+  ideas: { key: '', results: [], total: 0, loading: false, error: null, phase: '' },
+  idea: null, // currently open Spoonacular recipe
   search: '',
   dislikeSearch: '',
   servings: {}, // recipeId → servings
@@ -151,7 +155,7 @@ function render() {
     return;
   }
   const { name, arg, params } = parseRoute();
-  const views = { '': viewToday, phase: viewPhase, recipes: viewRecipes, recipe: viewRecipe, list: viewList, settings: viewSettings };
+  const views = { '': viewToday, phase: viewPhase, recipes: viewRecipes, recipe: viewRecipe, idea: viewIdea, list: viewList, settings: viewSettings };
   const view = views[name] ? name : '';
   const withNav = ['', 'recipes', 'list'].includes(view);
   nav.hidden = !withNav;
@@ -630,7 +634,7 @@ function renderRecipeResults() {
 }
 
 function mealChips() {
-  return ['all', 'classics', 'breakfast', 'lunch', 'dinner', 'snack']
+  return ['all', ...(ui.recipeSource === 'ideas' ? [] : ['classics']), 'breakfast', 'lunch', 'dinner', 'snack']
     .map((m) => {
       const on = ui.meal === m;
       const label = m === 'all' ? 'All' : m === 'classics' ? 'Classics' : MEALS[m];
@@ -669,15 +673,26 @@ function phaseSelect() {
     </label>`;
 }
 
+function refreshResults() {
+  if (ui.recipeSource === 'ideas') loadIdeas();
+  else renderRecipeResults();
+}
+
 function viewRecipes(arg, params) {
   if (params.get('phase')) ui.recipePhase = params.get('phase');
+  const ideas = ui.recipeSource === 'ideas';
+  if (ideas && ui.meal === 'classics') ui.meal = 'all';
   app.innerHTML = `
     <h1 class="page-title">Recipes</h1>
+    <div class="seg" role="tablist" aria-label="Recipe source">
+      <button type="button" role="tab" aria-selected="${!ideas}" class="${!ideas ? 'on' : ''}" data-act="source" data-source="ours">Our recipes</button>
+      <button type="button" role="tab" aria-selected="${ideas}" class="${ideas ? 'on' : ''}" data-act="source" data-source="ideas">More ideas</button>
+    </div>
     ${phaseSelect()}
     <label class="search">
       ${icon('search', 20, 'muted')}
       <span class="sr-only">Search</span>
-      <input type="search" placeholder="Search recipes or ingredients" value="${esc(ui.search)}" data-input="recipe-search" autocomplete="off" enterkeyhint="search">
+      <input type="search" placeholder="${ideas ? 'Search ideas, then press enter' : 'Search recipes or ingredients'}" value="${esc(ui.search)}" data-input="recipe-search" autocomplete="off" enterkeyhint="search">
     </label>
     <a class="diet-row" href="#/settings">
       ${icon('sliders', 18, 'muted')}
@@ -688,7 +703,319 @@ function viewRecipes(arg, params) {
     <div class="chips scroll-x cuisine-row" id="cuisineChips" role="group" aria-label="Filter by cuisine">${cuisineChips()}</div>
     <div id="results"></div>
   `;
-  renderRecipeResults();
+  refreshResults();
+}
+
+// ───────────────────────── More ideas (Spoonacular via our worker) ─────────────────────────
+// Spoonacular terms: data may be cached for max. 1 hour; only id, title and image URL may be
+// stored permanently (used for saved ideas). Every recipe credits its original source, and the
+// free plan requires a visible "Powered by Spoonacular" backlink.
+
+const IDEA_CACHE_MS = 55 * 60 * 1000;
+const ideaCache = new Map(); // url → { at, data }
+
+function apiBase() {
+  try {
+    return localStorage.getItem('ck:apiBase') || API_BASE; // override only used for local testing
+  } catch {
+    return API_BASE;
+  }
+}
+
+async function apiGet(path) {
+  const url = apiBase().replace(/\/$/, '') + path;
+  const hit = ideaCache.get(url);
+  if (hit && Date.now() - hit.at < IDEA_CACHE_MS) return hit.data;
+  const res = await fetch(url);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(data.error || 'request failed'), { status: res.status });
+  ideaCache.set(url, { at: Date.now(), data });
+  return data;
+}
+
+const RED_MEAT = 'beef,pork,lamb,veal,bacon,ham,sausage,salami,chorizo,prosciutto,pancetta,steak,mince';
+const API_DIET = { vegetarian: 'vegetarian', vegan: 'vegan', pescetarian: 'pescetarian' };
+const API_INTOL = { gluten: 'gluten', dairy: 'dairy', egg: 'egg', nuts: 'peanut,tree nut' };
+const API_TYPE = { breakfast: 'breakfast', lunch: 'main course', dinner: 'main course', snack: 'snack' };
+const API_CUISINE = { romanian: 'eastern european' };
+const PHASE_NUTRIENT = {
+  menstruation: { name: 'Iron', label: 'Rich in iron' },
+  follicular: { name: 'Protein', label: 'High in protein' },
+  ovulation: { name: 'Fiber', label: 'High in fiber' },
+  luteal: { name: 'Magnesium', label: 'Rich in magnesium' },
+};
+
+function ideasPhase() {
+  const v = ui.recipePhase;
+  if (v === 'now') return cycleInfo().phaseId;
+  return PHASES[v] ? v : '';
+}
+
+function ideasQuery(offset = 0) {
+  const s = state.settings;
+  const exclude = s.excluded.map((id) => ING[id].name.replace(/ \(.*\)$/, '').toLowerCase());
+  if (s.excluded.includes('coriander')) exclude.push('coriander');
+  if (s.diet === 'chickenfish') exclude.push(RED_MEAT);
+  const p = new URLSearchParams();
+  const phase = ideasPhase();
+  if (phase) p.set('phase', phase);
+  if (ui.cuisine !== 'all') p.set('cuisine', API_CUISINE[ui.cuisine] || ui.cuisine);
+  if (API_TYPE[ui.meal]) p.set('type', API_TYPE[ui.meal]);
+  if (API_DIET[s.diet]) p.set('diet', API_DIET[s.diet]);
+  const intol = s.avoidTags.map((t) => API_INTOL[t]).filter(Boolean).join(',');
+  if (intol) p.set('intolerances', intol);
+  if (exclude.length) p.set('exclude', exclude.join(','));
+  if (ui.search.trim()) p.set('q', ui.search.trim());
+  if (offset) p.set('offset', offset);
+  return p.toString();
+}
+
+function ideaFocus(nutrients, phase) {
+  const f = PHASE_NUTRIENT[phase];
+  if (!f) return '';
+  const n = (nutrients || []).find((x) => x.name === f.name);
+  return n ? `${f.label} · ${Math.round(n.amount)} ${n.unit}` : f.label;
+}
+
+function ideaRow(r, phase) {
+  const saved = state.savedIdeas.some((x) => x.id === r.id);
+  const focus = ideaFocus(r.nutrients, phase);
+  return `
+    <a class="rrow" href="#/idea/${r.id}">
+      <span class="rthumb" style="--tint:#EEEDE7;--dot:#5B635C">${icon('lunch', 26)}${
+        r.image ? `<img class="photo" src="${esc(r.image)}" alt="" loading="lazy" decoding="async" onerror="this.remove()">` : ''
+      }</span>
+      <span class="rrow-body">
+        <span class="rtitle">${esc(r.title)}</span>
+        <span class="rrow-meta"><span>${r.readyInMinutes ? r.readyInMinutes + ' min' : ''}</span>${focus ? `<span class="tag">${esc(focus)}</span>` : ''}</span>
+        <span class="rrow-sub">${r.sourceName ? esc(r.sourceName) : 'Spoonacular'}${saved ? ' · <span class="saved">♥ Saved</span>' : ''}</span>
+      </span>
+      ${icon('chevron', 20, 'muted')}
+    </a>`;
+}
+
+const POWERED = `<p class="powered">Recipe ideas powered by <a href="https://spoonacular.com/food-api" target="_blank" rel="noopener">Spoonacular</a></p>`;
+
+function ideasError(e) {
+  if (!apiBase()) return 'More ideas will show up here once the recipe service is connected.';
+  if (e.status === 429) return "Today's recipe-idea limit is used up – new ideas tomorrow. Your own recipes still work.";
+  if (!navigator.onLine) return 'You are offline. More ideas need an internet connection.';
+  return "Couldn't load ideas right now. Please try again in a moment.";
+}
+
+async function loadIdeas(append = false) {
+  const el = document.getElementById('results');
+  if (!el) return;
+  if (ui.recipePhase === 'saved') {
+    el.innerHTML = state.savedIdeas.length
+      ? `<div class="rlist">${state.savedIdeas.map((r) => ideaRow(r, '')).join('')}</div>${POWERED}`
+      : `<div class="empty">No saved ideas yet. Tap the heart on an idea to keep it here.</div>`;
+    return;
+  }
+  if (!apiBase()) {
+    el.innerHTML = `<div class="empty">${ideasError({})}</div>`;
+    return;
+  }
+  const offset = append ? ui.ideas.results.length : 0;
+  const key = ideasQuery();
+  if (!append && ui.ideas.key === key && ui.ideas.results.length) {
+    renderIdeas();
+    return;
+  }
+  ui.ideas.loading = true;
+  if (!append) el.innerHTML = '<div class="empty">Finding recipes for you…</div>';
+  else renderIdeas();
+  try {
+    const data = await apiGet('/search?' + ideasQuery(offset));
+    if (ideasQuery() !== key) return; // filters changed meanwhile
+    ui.ideas = {
+      key,
+      phase: ideasPhase(),
+      results: append ? [...ui.ideas.results, ...data.results] : data.results,
+      total: data.total,
+      loading: false,
+      error: null,
+    };
+  } catch (e) {
+    ui.ideas = { ...ui.ideas, key: '', loading: false, error: ideasError(e) };
+  }
+  renderIdeas();
+}
+
+function renderIdeas() {
+  const el = document.getElementById('results');
+  if (!el || ui.recipeSource !== 'ideas') return;
+  const { results, total, loading, error, phase } = ui.ideas;
+  if (error && !results.length) {
+    el.innerHTML = `<div class="empty">${esc(error)}</div>`;
+    return;
+  }
+  if (!results.length) {
+    el.innerHTML = `<div class="empty">No ideas match these filters. Try “All cuisines” or another meal.</div>${POWERED}`;
+    return;
+  }
+  const more = results.length < Math.min(total, 900);
+  el.innerHTML = `
+    <p class="fineprint ideas-count">${total} ideas ${phase ? 'for ' + PHASES[phase].name.toLowerCase() : ''} · matched to your diet</p>
+    <div class="rlist">${results.map((r) => ideaRow(r, phase)).join('')}</div>
+    ${error ? `<p class="fineprint center">${esc(error)}</p>` : ''}
+    ${more ? `<button class="btn ghost block-btn" data-act="ideas-more" ${loading ? 'disabled' : ''}>${loading ? 'Loading…' : 'Show more ideas'}</button>` : ''}
+    ${POWERED}`;
+}
+
+// Idea detail
+
+const AISLE_CAT = [
+  [/produce|vegetable|fruit/i, 'produce'],
+  [/milk|egg|dairy|cheese|refrigerated/i, 'fridge'],
+  [/meat|seafood|fish/i, 'meatfish'],
+  [/spice|season|oil|vinegar/i, 'spices'],
+  [/nut|seed|dried fruit/i, 'seeds'],
+  [/pasta|rice|canned|jarred|baking|condiment|ethnic|bread|bakery|cereal|health|grain|sweet/i, 'pantry'],
+];
+
+function normUnit(amount, unit) {
+  const u = (unit || '').toLowerCase();
+  if (u === 'kg') return [amount * 1000, 'g'];
+  if (u === 'l') return [amount * 1000, 'ml'];
+  if (u.startsWith('tbsp')) return [amount, 'tbsp'];
+  if (u.startsWith('tsp')) return [amount, 'tsp'];
+  if (u === 'g' || u === 'ml') return [amount, u];
+  return [amount, unit || ''];
+}
+
+async function viewIdea(id) {
+  app.innerHTML = `<div class="topbar">${backBtn('#/recipes')}</div><div class="empty">Loading recipe…</div>`;
+  let r;
+  try {
+    r = await apiGet('/recipe/' + encodeURIComponent(id));
+  } catch (e) {
+    app.innerHTML = `<div class="topbar">${backBtn('#/recipes')}</div><div class="empty">${esc(ideasError(e))}</div>`;
+    return;
+  }
+  if (parseRoute().name !== 'idea' || parseRoute().arg !== String(id)) return; // user navigated away
+  ui.idea = r;
+  renderIdea();
+}
+
+function renderIdea() {
+  const r = ui.idea;
+  if (!r) return;
+  const key = 'idea-' + r.id;
+  const servings = ui.servings[key] ?? state.settings.defaultServings ?? r.servings;
+  const factor = servings / (r.servings || 1);
+  if (!ui.unchecked[key]) ui.unchecked[key] = new Set();
+  const unchecked = ui.unchecked[key];
+  const saved = state.savedIdeas.some((x) => x.id === r.id);
+  const phase = cycleInfo().phaseId;
+  const focus = PHASE_NUTRIENT[phase];
+  const fn = r.nutrients.find((n) => n.name === focus.name);
+  const why = fn
+    ? `${Math.round(fn.amount)} ${fn.unit} ${focus.name.toLowerCase()} per serving (${Math.round(fn.percent)}% of what you need in a day) – ${PHASES[phase].title.toLowerCase()} is what your ${PHASES[phase].name.toLowerCase()} asks for.`
+    : `A recipe idea for your ${PHASES[phase].name.toLowerCase()}.`;
+  const chips = r.nutrients
+    .filter((n) => n.name !== 'Calories')
+    .map((n) => `<span class="mini-pill neutral">${esc(n.name)} ${Math.round(n.amount)} ${esc(n.unit)}</span>`)
+    .join('');
+  const selected = r.ingredients.filter((_, i) => !unchecked.has(i)).length;
+  const isIng = ui.recipeTab === 'ing';
+
+  const ingRows = r.ingredients
+    .map((ing, i) => {
+      const [amt, unit] = normUnit((ing.amount || 0) * factor, ing.unit);
+      return `
+        <li class="ing-row">
+          <label>
+            <input type="checkbox" class="round-check" data-change="idea-ing" data-idx="${i}" ${unchecked.has(i) ? '' : 'checked'}>
+            <span class="ing-name">${esc(ing.name)}</span>
+            <span class="ing-amt">${ing.amount ? esc(fmtAmount(amt, unit)) : ''}</span>
+          </label>
+        </li>`;
+    })
+    .join('');
+
+  app.innerHTML = `
+    <div class="hero-img" style="--tint:#EEEDE7;--dot:#5B635C">
+      <button class="circle-btn on-img" data-act="back" aria-label="Back to recipes">${icon('back', 20)}</button>
+      <button class="circle-btn on-img fav ${saved ? 'on' : ''}" data-act="save-idea" aria-pressed="${saved}" aria-label="Save recipe">${icon('heart', 20)}</button>
+      ${icon('lunch', 72)}
+      ${r.image ? `<img class="photo" src="${esc(r.image.replace(/-\d+x\d+\.(jpg|png)$/, '-556x370.$1'))}" alt="${esc(r.title)}" decoding="async" onerror="this.remove()">` : ''}
+    </div>
+    <div class="sheet">
+      <h1 class="recipe-title">${esc(r.title)}</h1>
+      <div class="row between wrap">
+        <span class="meta">
+          ${r.readyInMinutes ? `<span class="meta-i">${icon('clock', 16)}${r.readyInMinutes} min</span>` : ''}
+          ${r.cuisines.length ? `<span>${esc(r.cuisines.slice(0, 2).join(', '))}</span>` : ''}
+        </span>
+        ${stepper('idea-servings', servings, 1, 12, `${servings} ${servings === 1 ? 'serving' : 'servings'}`, 'Fewer', 'More')}
+      </div>
+      <div class="why-card">
+        <span class="why-label">Why now?</span>
+        <span>${esc(why)}</span>
+        <span class="phase-dots">${chips}</span>
+      </div>
+      ${
+        r.sourceUrl
+          ? `<a class="source-card" href="${esc(r.sourceUrl)}" target="_blank" rel="noopener noreferrer">
+              <span class="source-text"><span class="source-title">View original recipe</span><span class="source-sub">Recipe from ${esc(r.sourceName || 'the original site')}</span></span>
+              <span class="cta-dot">${icon('external', 18)}</span>
+            </a>`
+          : ''
+      }
+      <div class="tabs" role="tablist" aria-label="Recipe view">
+        <button type="button" role="tab" aria-selected="${isIng}" class="${isIng ? 'on' : ''}" data-act="idea-tab" data-tab="ing">Ingredients</button>
+        <button type="button" role="tab" aria-selected="${!isIng}" class="${!isIng ? 'on' : ''}" data-act="idea-tab" data-tab="steps">Method</button>
+      </div>
+      ${
+        isIng
+          ? `<ul class="white-card ing-list">${ingRows}</ul><p class="fineprint">Untick what you already have at home. Amounts are converted to metric.</p>`
+          : `<ol class="white-card steps">${r.steps.map((s, i) => `<li><span class="step-n">${i + 1}</span><span>${esc(s)}</span></li>`).join('')}</ol>`
+      }
+      ${POWERED}
+    </div>
+    <button class="dark-cta sticky-cta" data-act="idea-add" ${selected ? '' : 'disabled'}>
+      ${icon('bag', 20)}<span>Add ${selected} ${selected === 1 ? 'item' : 'items'} to shopping list</span>
+    </button>
+  `;
+}
+
+function addIdeaToList() {
+  const r = ui.idea;
+  const key = 'idea-' + r.id;
+  const servings = ui.servings[key] ?? state.settings.defaultServings ?? r.servings;
+  const factor = servings / (r.servings || 1);
+  const unchecked = ui.unchecked[key] || new Set();
+  let added = 0;
+  r.ingredients.forEach((ing, i) => {
+    if (unchecked.has(i)) return;
+    const [amt, unit] = ing.amount ? normUnit(ing.amount * factor, ing.unit) : [null, ''];
+    const name = ing.name.charAt(0).toUpperCase() + ing.name.slice(1);
+    const itemKey = `api:${ing.name.toLowerCase()}|${unit}`;
+    const cat = (AISLE_CAT.find(([re]) => re.test(ing.aisle)) || [null, guessCategory(ing.name)])[1];
+    const existing = state.shopping.find((x) => x.key === itemKey && !x.checked);
+    if (existing) {
+      if (amt != null) existing.amount = (existing.amount || 0) + amt;
+      if (!existing.sources.includes(r.title)) existing.sources.push(r.title);
+    } else {
+      state.shopping.push({ id: uid(), key: itemKey, ingId: null, name, amount: amt, unit, cat, checked: false, sources: [r.title] });
+    }
+    added++;
+  });
+  commit();
+  renderIdea();
+  updateBadge();
+  toast(`${added} ${added === 1 ? 'item' : 'items'} added to your shopping list`);
+}
+
+function toggleSaveIdea() {
+  const r = ui.idea;
+  const i = state.savedIdeas.findIndex((x) => x.id === r.id);
+  if (i >= 0) state.savedIdeas.splice(i, 1);
+  else state.savedIdeas.push({ id: r.id, title: r.title, image: r.image }); // only id, title & image may be stored
+  commit();
+  renderIdea();
+  toast(i >= 0 ? 'Removed from saved' : 'Saved ♥');
 }
 
 // ───────────────────────── Recipe detail ─────────────────────────
@@ -1246,12 +1573,12 @@ const actions = {
   meal: (el) => {
     ui.meal = el.dataset.meal;
     document.getElementById('mealChips').innerHTML = mealChips();
-    renderRecipeResults();
+    refreshResults();
   },
   cuisine: (el) => {
     ui.cuisine = el.dataset.cuisine;
     document.getElementById('cuisineChips').innerHTML = cuisineChips();
-    renderRecipeResults();
+    refreshResults();
   },
   back: () => {
     if (history.length > 1) history.back();
@@ -1275,6 +1602,13 @@ const actions = {
     const delta = Number(el.dataset.delta);
     const min = Number(el.dataset.min);
     const max = Number(el.dataset.max);
+    if (field === 'idea-servings') {
+      const k = 'idea-' + ui.idea.id;
+      const cur = ui.servings[k] ?? state.settings.defaultServings ?? ui.idea.servings;
+      ui.servings[k] = Math.min(max, Math.max(min, cur + delta));
+      renderIdea();
+      return;
+    }
     if (field === 'servings') {
       const r = RECIPE_BY_ID[parseRoute().arg];
       ui.servings[r.id] = Math.min(max, Math.max(min, recipeServings(r) + delta));
@@ -1287,6 +1621,17 @@ const actions = {
     afterSettingsChange();
   },
   'add-to-list': (el) => addRecipeToList(el.dataset.id),
+  source: (el) => {
+    ui.recipeSource = el.dataset.source;
+    render();
+  },
+  'ideas-more': () => loadIdeas(true),
+  'save-idea': () => toggleSaveIdea(),
+  'idea-add': () => addIdeaToList(),
+  'idea-tab': (el) => {
+    ui.recipeTab = el.dataset.tab;
+    renderIdea();
+  },
   'swap-meal': (el) => {
     const offsets = menuOffsets();
     offsets[el.dataset.meal] = (offsets[el.dataset.meal] || 0) + 1;
@@ -1370,6 +1715,13 @@ const actions = {
 };
 
 const changes = {
+  'idea-ing': (el) => {
+    const set = ui.unchecked['idea-' + ui.idea.id];
+    const i = Number(el.dataset.idx);
+    if (el.checked) set.delete(i);
+    else set.add(i);
+    renderIdea();
+  },
   'ing-toggle': (el) => {
     const set = ui.unchecked[el.dataset.recipe];
     if (el.checked) set.delete(el.dataset.id);
@@ -1410,7 +1762,9 @@ const changes = {
 const inputs = {
   'recipe-search': (el) => {
     ui.search = el.value;
-    renderRecipeResults();
+    if (ui.recipeSource === 'ideas') {
+      if (!el.value) loadIdeas(); // cleared
+    } else renderRecipeResults();
   },
   'dislike-search': (el) => {
     ui.dislikeSearch = el.value;
@@ -1431,6 +1785,15 @@ app.addEventListener('input', (e) => {
   const el = e.target.closest('[data-input]');
   if (el) inputs[el.dataset.input]?.(el, e);
 });
+app.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && e.target.matches('[data-input="recipe-search"]') && ui.recipeSource === 'ideas') {
+    e.preventDefault();
+    ui.search = e.target.value;
+    e.target.blur();
+    loadIdeas();
+  }
+});
+
 app.addEventListener('submit', (e) => {
   const form = e.target.closest('[data-submit="shop-add"]');
   if (!form) return;

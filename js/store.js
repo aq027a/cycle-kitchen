@@ -17,6 +17,7 @@ export function defaultState() {
     },
     periodLog: [], // period start dates 'YYYY-MM-DD'
     favorites: [],
+    savedIdeas: [], // Spoonacular ideas: only id, title & image (allowed by their terms)
     shopping: [],
   };
 }

@@ -1,0 +1,10 @@
+name = "cycle-kitchen-api"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+
+[vars]
+# Only these sites may call the API (the live app and local testing)
+ALLOWED_ORIGINS = "https://aq027a.github.io,http://localhost:8080"
+
+# The Spoonacular key is NOT stored here. Set it once with:
+#   npx wrangler secret put SPOONACULAR_KEY
