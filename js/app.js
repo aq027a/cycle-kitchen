@@ -96,13 +96,14 @@ function ingredientAllowed(id) {
 function dietLabel(recipe, omitted = []) {
   const tags = new Set(recipe.ingredients.filter(([id]) => !omitted.includes(id)).flatMap(([id]) => ING[id].tags));
   if (tags.has('meat')) return 'With meat';
+  if (tags.has('poultry')) return 'With chicken';
   if (tags.has('fish')) return 'With fish';
   if (['dairy', 'egg', 'honey'].some((t) => tags.has(t))) return 'Vegetarian';
   return 'Vegan';
 }
 
 function hasMeat(r) {
-  return r.ingredients.some(([id]) => ING[id].tags.includes('meat'));
+  return r.ingredients.some(([id]) => ING[id].tags.some((t) => t === 'meat' || t === 'poultry'));
 }
 
 /** Flexitarians see plant-based recipes first. */
@@ -122,7 +123,7 @@ function cycleInfo() {
 function dietSummary() {
   const s = state.settings;
   const parts = [DIETS[s.diet].name, ...s.avoidTags.map((t) => AVOID_TAGS[t].toLowerCase())];
-  const names = s.excluded.map((id) => ING[id].name.toLowerCase());
+  const names = s.excluded.map((id) => ING[id].name.replace(/ \(.*\)$/, '').toLowerCase());
   if (names.length) parts.push('no ' + (names.length > 3 ? names.slice(0, 3).join(', ') + ` +${names.length - 3}` : names.join(', ')));
   return parts.join(' · ');
 }
@@ -200,7 +201,7 @@ function recipeRow(r) {
       <span class="rrow-body">
         <span class="rtitle">${esc(r.title)}</span>
         <span class="rrow-meta"><span>${MEALS[r.meal]} · ${r.time} min</span><span class="tag">${esc(r.tag)}</span></span>
-        <span class="rrow-sub">${dietLabel(r, ev.omitted)}${r.source ? ' · ' + esc(r.source.name) : ''}${fav ? ' · <span class="saved">♥ Saved</span>' : ''}</span>
+        <span class="rrow-sub">${dietLabel(r, ev.omitted)}${r.ro ? ' · <span class="ro">' + esc(r.ro) + '</span>' : r.source ? ' · ' + esc(r.source.name) : ''}${fav ? ' · <span class="saved">♥ Saved</span>' : ''}</span>
       </span>
       ${icon('chevron', 20, 'muted')}
     </a>`;
@@ -460,12 +461,14 @@ function filteredRecipes() {
   let base = RECIPES;
   if (phase) base = base.filter((r) => r.phases.includes(phase));
   if (f === 'saved') base = base.filter((r) => state.favorites.includes(r.id));
-  if (ui.meal !== 'all') base = base.filter((r) => r.meal === ui.meal);
+  if (ui.meal === 'ro') base = base.filter((r) => r.ro);
+  else if (ui.meal !== 'all') base = base.filter((r) => r.meal === ui.meal);
   const q = normalize(ui.search.trim());
   if (q) {
     base = base.filter(
       (r) =>
         normalize(r.title).includes(q) ||
+        normalize(r.ro || '').includes(q) ||
         normalize(r.tag).includes(q) ||
         r.ingredients.some(([id]) => normalize(ING[id].name).includes(q) || (ING[id].alt || []).some((a) => normalize(a).includes(q)))
     );
@@ -491,10 +494,11 @@ function renderRecipeResults() {
 }
 
 function mealChips() {
-  return ['all', 'breakfast', 'lunch', 'dinner', 'snack']
+  return ['all', 'ro', 'breakfast', 'lunch', 'dinner', 'snack']
     .map((m) => {
       const on = ui.meal === m;
-      return `<button type="button" class="chip ${on ? 'on' : ''}" aria-pressed="${on}" data-act="meal" data-meal="${m}">${m === 'all' ? 'All' : MEALS[m]}</button>`;
+      const label = m === 'all' ? 'All' : m === 'ro' ? 'Romanian-style' : MEALS[m];
+      return `<button type="button" class="chip ${on ? 'on' : ''}" aria-pressed="${on}" data-act="meal" data-meal="${m}">${label}</button>`;
     })
     .join('');
 }
@@ -604,6 +608,7 @@ function viewRecipe(id) {
     </div>
     <div class="sheet">
       <h1 class="recipe-title">${esc(r.title)}</h1>
+      ${r.ro ? `<p class="ro-line">In Romania: <b>${esc(r.ro)}</b></p>` : ''}
       <div class="row between wrap">
         <span class="meta">
           <span class="meta-i">${icon('clock', 16)}${r.time} min</span>

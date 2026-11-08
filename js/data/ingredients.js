@@ -1,5 +1,5 @@
 // Ingredient catalog. Tags drive the filters:
-//  meat, fish        → not vegetarian
+//  meat (red meat), poultry, fish → not vegetarian
 //  dairy, egg, honey → not vegan
 //  gluten, nuts      → intolerances
 // staple: true       → pantry basics (left off the shopping list by default)
@@ -76,7 +76,7 @@ export const INGREDIENTS = [
   I('salmon', 'Salmon fillet', 'meatfish', ['fish'], { alt: ['Fish'] }),
   I('smoked_salmon', 'Smoked salmon', 'meatfish', ['fish'], { alt: ['Fish', 'Salmon'] }),
   I('beef', 'Ground beef', 'meatfish', ['meat'], { alt: ['Mince', 'Meat'] }),
-  I('chicken', 'Chicken breast', 'meatfish', ['meat'], { alt: ['Meat'] }),
+  I('chicken', 'Chicken breast', 'meatfish', ['poultry'], { alt: ['Meat', 'Poultry'] }),
 
   // Pantry
   I('red_lentils', 'Red lentils', 'pantry', [], { alt: ['Lentils'] }),
@@ -136,7 +136,7 @@ export const INGREDIENTS = [
   I('ricotta', 'Ricotta', 'fridge', ['dairy'], { alt: ['Cheese'] }),
   I('almond_milk', 'Almond milk', 'fridge', ['nuts'], { alt: ['Plant milk', 'Nuts'] }),
   I('beef_stock', 'Beef stock cube', 'pantry', ['meat'], { alt: ['Stock'] }),
-  I('chicken_stock', 'Chicken stock', 'pantry', ['meat'], { alt: ['Stock'] }),
+  I('chicken_stock', 'Chicken stock', 'pantry', ['poultry'], { alt: ['Stock'] }),
   I('tomato_puree', 'Tomato purée', 'pantry', [], { alt: ['Tomato paste', 'Tomato'] }),
   I('kidney_beans', 'Kidney beans (canned)', 'pantry', [], { alt: ['Beans'] }),
   I('mixed_beans', 'Mixed beans (canned)', 'pantry', [], { alt: ['Beans'] }),
@@ -171,7 +171,47 @@ export const INGREDIENTS = [
   I('pine_nuts', 'Pine nuts', 'seeds', ['nuts'], { alt: ['Nuts'] }),
   I('mixed_nuts_seeds', 'Mixed nuts & seeds', 'seeds', ['nuts'], { alt: ['Nuts'] }),
 
+  // Added with the chicken, salmon, tuna & Romanian-style recipes
+  I('chicken_thighs', 'Chicken thighs', 'meatfish', ['poultry'], { alt: ['Chicken', 'Meat'] }),
+  I('whole_chicken', 'Whole chicken', 'meatfish', ['poultry'], { alt: ['Chicken', 'Meat'] }),
+  I('tuna_can', 'Tuna (canned, in water)', 'meatfish', ['fish'], { alt: ['Tuna', 'Fish'] }),
+  I('tuna_steak', 'Tuna steaks', 'meatfish', ['fish'], { alt: ['Tuna', 'Fish'] }),
+  I('potatoes', 'Potatoes', 'produce'),
+  I('leek', 'Leek', 'produce'),
+  I('cauliflower', 'Cauliflower', 'produce'),
+  I('white_cabbage', 'White cabbage', 'produce', [], { alt: ['Cabbage'] }),
+  I('green_beans', 'Green beans', 'produce', [], { alt: ['Beans'] }),
+  I('butternut', 'Butternut squash', 'produce', [], { alt: ['Squash', 'Pumpkin'] }),
+  I('rosemary', 'Rosemary', 'produce'),
+  I('butter', 'Butter', 'fridge', ['dairy']),
+  I('cottage_cheese', 'Cottage cheese', 'fridge', ['dairy'], { alt: ['Cheese'] }),
+  I('creme_fraiche', 'Crème fraîche', 'fridge', ['dairy'], { alt: ['Sour cream', 'Cream'] }),
+  I('double_cream', 'Double cream', 'fridge', ['dairy'], { alt: ['Cream'] }),
+  I('taleggio', 'Taleggio (or other melting cheese)', 'fridge', ['dairy'], { alt: ['Cheese'] }),
+  I('plain_flour', 'Plain flour', 'pantry', ['gluten'], { alt: ['Flour'] }),
+  I('breadcrumbs', 'Breadcrumbs (panko)', 'pantry', ['gluten']),
+  I('ciabatta', 'Ciabatta', 'pantry', ['gluten'], { alt: ['Bread'] }),
+  I('wholemeal_penne', 'Wholemeal penne', 'pantry', ['gluten'], { alt: ['Pasta'] }),
+  I('rice_noodles', 'Rice noodles', 'pantry', [], { alt: ['Noodles'] }),
+  I('cooked_rice', 'Cooked rice (pouch)', 'pantry', [], { alt: ['Rice'] }),
+  I('cooked_puy_lentils', 'Cooked Puy lentils (pouch)', 'pantry', [], { alt: ['Lentils'] }),
+  I('polenta', 'Quick-cook polenta', 'pantry', [], { alt: ['Cornmeal', 'Mamaliga'] }),
+  I('dried_porcini', 'Dried porcini', 'pantry', [], { alt: ['Mushrooms'] }),
+  I('red_wine', 'Red wine', 'pantry', [], { alt: ['Wine'] }),
+  I('sweetcorn', 'Sweetcorn (canned)', 'pantry', [], { alt: ['Corn'] }),
+  I('olives', 'Black olives', 'pantry', [], { alt: ['Olives'] }),
+  I('capers', 'Capers', 'pantry'),
+  I('dijon', 'Dijon mustard', 'pantry', [], { alt: ['Mustard'] }),
+  I('curry_paste', 'Curry paste (mild)', 'pantry', [], { alt: ['Curry'] }),
+  I('sweet_chilli', 'Sweet chilli sauce', 'pantry', [], { alt: ['Chili'] }),
+  I('mixed_seeds', 'Mixed seeds', 'seeds', [], { alt: ['Seeds'] }),
+  I('flaked_almonds', 'Flaked almonds', 'seeds', ['nuts'], { alt: ['Almonds', 'Nuts'] }),
+
   // Spices & oils (pantry basics)
+  I('hot_paprika', 'Hot paprika', 'spices', [], { staple: true, alt: ['Paprika', 'Chili'] }),
+  I('piri_piri', 'Piri-piri spice mix', 'spices', [], { staple: true, alt: ['Chili'] }),
+  I('sherry_vinegar', 'Sherry vinegar', 'spices', [], { staple: true, alt: ['Vinegar'] }),
+  I('white_wine_vinegar', 'White wine vinegar', 'spices', [], { staple: true, alt: ['Vinegar'] }),
   I('veg_oil', 'Vegetable oil', 'spices', [], { staple: true, alt: ['Rapeseed oil', 'Sunflower oil'] }),
   I('chili_powder', 'Chilli powder', 'spices', [], { staple: true, alt: ['Chili'] }),
   I('marjoram', 'Dried marjoram', 'spices', [], { staple: true }),
@@ -215,9 +255,10 @@ export const COMMON_DISLIKES = [
 export const DIETS = {
   omni: { name: 'Everything', hint: 'No restrictions', forbidden: [] },
   flexitarian: { name: 'Flexitarian', hint: 'Mostly plants, meat now and then', forbidden: [], preferPlants: true },
-  pescetarian: { name: 'Pescatarian', hint: 'Vegetarian plus fish & seafood', forbidden: ['meat'] },
-  vegetarian: { name: 'Vegetarian', hint: 'No meat or fish', forbidden: ['meat', 'fish'] },
-  vegan: { name: 'Vegan', hint: 'No animal products', forbidden: ['meat', 'fish', 'dairy', 'egg', 'honey'] },
+  chickenfish: { name: 'Chicken & fish', hint: 'Vegetarian plus chicken & fish, no red meat', forbidden: ['meat'] },
+  pescetarian: { name: 'Pescatarian', hint: 'Vegetarian plus fish & seafood', forbidden: ['meat', 'poultry'] },
+  vegetarian: { name: 'Vegetarian', hint: 'No meat or fish', forbidden: ['meat', 'poultry', 'fish'] },
+  vegan: { name: 'Vegan', hint: 'No animal products', forbidden: ['meat', 'poultry', 'fish', 'dairy', 'egg', 'honey'] },
 };
 
 // Intolerances / extra exclusions
